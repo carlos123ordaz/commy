@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   Search, RefreshCw, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, XCircle, Download, Phone, MapPin,
 } from 'lucide-react';
-import type { Order, OrderStatus, OrderType } from '../../types';
+import type { Order, OrderType } from '../../types';
 import type { PaginatedResponse } from '../../types';
 import { api } from '../../config/api';
 import { Button } from '../../components/ui/Button';
@@ -171,7 +171,7 @@ export const OrderHistoryPage: React.FC = () => {
     try {
       await api.patch(`/orders/${orderId}/status`, { status: 'cancelled' });
       setRejectingId(null);
-      fetchOrders(page, statusFilter);
+      fetchOrders(page, statusFilter, dateFrom, dateTo);
     } catch {
       // ignore
     } finally {

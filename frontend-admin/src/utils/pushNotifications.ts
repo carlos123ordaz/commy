@@ -20,7 +20,7 @@ export async function registerPushSubscription(): Promise<void> {
 
   const registration = await navigator.serviceWorker.ready;
   const vapidPublicKey = await getVapidPublicKey();
-  const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+  const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey).buffer as ArrayBuffer;
 
   let subscription = await registration.pushManager.getSubscription();
 

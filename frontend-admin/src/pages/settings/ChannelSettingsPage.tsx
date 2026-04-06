@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { QrCode, Download, RefreshCw, Plus, Trash2, Save, Truck, ShoppingBag, Clock, DollarSign } from 'lucide-react';
+import { QrCode, Download, Plus, Trash2, Save, Truck, ShoppingBag, Clock, DollarSign } from 'lucide-react';
 import type { Restaurant, DeliveryHour } from '../../types';
 import { api } from '../../config/api';
 import { Button } from '../../components/ui/Button';

@@ -257,7 +257,7 @@ export const ChannelLandingPage: React.FC = () => {
                 +{formatCurrency(channelConfig.fee)} cargo adicional
               </span>
             )}
-            {isDelivery && 'estimatedMinutes' in channelConfig && channelConfig.estimatedMinutes > 0 && (
+            {isDelivery && 'estimatedMinutes' in channelConfig && (channelConfig as { estimatedMinutes: number }).estimatedMinutes > 0 && (
               <span className="text-xs bg-blue-50 text-blue-700 px-3 py-1 rounded-full border border-blue-200 font-medium flex items-center gap-1">
                 <Clock size={11} />
                 ~{(channelConfig as { estimatedMinutes: number }).estimatedMinutes} min
