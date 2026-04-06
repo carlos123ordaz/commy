@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(xargs grep:*)",
+      "Bash(node -e \"const { GripVertical } = require\\('lucide-react'\\); console.log\\(typeof GripVertical\\);\")",
+      "Bash(cat \"C:\\\\Users\\\\carlo\\\\OneDrive\\\\Imágenes\\\\Documentos\\\\commy/frontend-admin/src/utils\"/*.ts)",
+      "Bash(node -e \"const webpush = require\\('web-push'\\); const keys = webpush.generateVAPIDKeys\\(\\); console.log\\('PUBLIC:', keys.publicKey\\); console.log\\('PRIVATE:', keys.privateKey\\);\")"
+    ]
+  }
+}
