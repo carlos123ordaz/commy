@@ -35,7 +35,6 @@ export const MenuPage: React.FC = () => {
   const [addingItem, setAddingItem] = useState(false);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [cartBounce, setCartBounce] = useState(false);
-  const [submittingOrder, setSubmittingOrder] = useState(false);
   const [markingReady, setMarkingReady] = useState(false);
   const [showOrderComplete, setShowOrderComplete] = useState(false);
 
@@ -329,21 +328,6 @@ export const MenuPage: React.FC = () => {
     }
   };
 
-  const submitOrder = async () => {
-    if (!orderId || !sessionId) return;
-    setSubmittingOrder(true);
-    try {
-      const res = await api.post(`/orders/${orderId}/submit`, { sessionId });
-      setOrder(res.data.data);
-      toast.success('Pedido enviado al restaurante');
-    } catch (err: unknown) {
-      const error = err as { response?: { data?: { message?: string } } };
-      toast.error(error.response?.data?.message || 'Error al enviar el pedido');
-    } finally {
-      setSubmittingOrder(false);
-    }
-  };
-
   const markReady = async () => {
     if (!orderId || !sessionId) return;
     setMarkingReady(true);
@@ -414,13 +398,14 @@ export const MenuPage: React.FC = () => {
         </div>
 
         {/* Active order status banner */}
-        {order && order.status !== 'draft' && order.status !== 'closed' && order.status !== 'cancelled' && order.status !== 'billed' && (
+        {order && order.status !== 'draft' && order.status !== 'closed' && order.status !== 'cancelled' && (
           <div className={cn(
             'mx-4 mb-2 rounded-xl px-4 py-2.5 text-sm font-semibold text-center',
             order.status === 'pending_confirmation' ? 'bg-amber-50 text-amber-700' :
             order.status === 'confirmed' ? 'bg-blue-50 text-blue-700' :
             order.status === 'preparing' ? 'bg-purple-50 text-purple-700' :
             order.status === 'ready' ? 'bg-emerald-50 text-emerald-700' :
+            order.status === 'billed' ? 'bg-slate-50 text-slate-600' :
             order.status === 'served' ? 'bg-slate-50 text-slate-600' : 'bg-slate-50 text-slate-600'
           )}>
             {order.status === 'pending_confirmation' && '⏳ Pedido enviado — esperando confirmación del restaurante'}
