@@ -5,10 +5,14 @@ import { cn } from '../../utils/cn';
 interface ModalProps {
   isOpen: boolean;
   onClose: () => void;
-  title?: string;
+  title?: React.ReactNode;
   children: React.ReactNode;
-  size?: 'sm' | 'md' | 'lg' | 'xl';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl';
   footer?: React.ReactNode;
+  className?: string;
+  contentClassName?: string;
+  headerClassName?: string;
+  footerClassName?: string;
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -18,6 +22,10 @@ export const Modal: React.FC<ModalProps> = ({
   children,
   size = 'md',
   footer,
+  className,
+  contentClassName,
+  headerClassName,
+  footerClassName,
 }) => {
   useEffect(() => {
     if (isOpen) {
@@ -43,6 +51,9 @@ export const Modal: React.FC<ModalProps> = ({
     md: 'max-w-md',
     lg: 'max-w-lg',
     xl: 'max-w-2xl',
+    '2xl': 'max-w-3xl',
+    '3xl': 'max-w-4xl',
+    '4xl': 'max-w-6xl',
   };
 
   return (
@@ -56,7 +67,8 @@ export const Modal: React.FC<ModalProps> = ({
           'relative w-full bg-white shadow-2xl animate-slide-up flex flex-col',
           'rounded-t-2xl sm:rounded-2xl',
           'max-h-[92dvh] sm:max-h-[90vh]',
-          sizes[size]
+          sizes[size],
+          className
         )}
       >
         {/* Drag handle - mobile only */}
@@ -65,8 +77,8 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
 
         {title && (
-          <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-100">
-            <h2 className="text-base font-semibold text-slate-900">{title}</h2>
+          <div className={cn('flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-100', headerClassName)}>
+            <div className="min-w-0 flex-1 pr-4">{title}</div>
             <button
               onClick={onClose}
               className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-all"
@@ -75,9 +87,9 @@ export const Modal: React.FC<ModalProps> = ({
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5">{children}</div>
+        <div className={cn('flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5', contentClassName)}>{children}</div>
         {footer && (
-          <div className="flex-shrink-0 px-4 sm:px-6 py-4 bg-slate-50 rounded-b-2xl border-t border-slate-100 flex justify-end gap-3">
+          <div className={cn('flex-shrink-0 px-4 sm:px-6 py-4 bg-slate-50 rounded-b-2xl border-t border-slate-100 flex justify-end gap-3', footerClassName)}>
             {footer}
           </div>
         )}

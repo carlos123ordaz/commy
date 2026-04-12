@@ -61,7 +61,7 @@ type LiveAction =
   | { type: 'ORDER_STATUS'; orderId: string; tableId: string; status: OrderStatus }
   | { type: 'TABLE_STATUS'; tableId: string; status: TableStatus }
   | { type: 'ALERT_NEW'; tableId: string; alert: TableAlert }
-  | { type: 'ALERT_RESOLVED'; tableId: string }
+  | { type: 'ALERT_RESOLVED'; tableId?: string; notificationId?: string }
   | { type: 'RESET' };
 
 const initialLive: LiveState = { tableStatuses: {}, tableOrders: {}, tableAlerts: {} };
@@ -71,8 +71,8 @@ function liveReducer(state: LiveState, action: LiveAction): LiveState {
     case 'SEED_ORDERS': {
       const tableOrders: Record<string, LiveOrderInfo> = { ...state.tableOrders };
       for (const order of action.orders) {
-        const tableId =
-          typeof order.table === 'string' ? order.table : (order.table as Table)._id;
+        const tableId = getOrderTableId(order);
+        if (!tableId) continue;
         tableOrders[tableId] = {
           orderId: order._id,
           orderNumber: order.orderNumber,
@@ -86,10 +86,8 @@ function liveReducer(state: LiveState, action: LiveAction): LiveState {
     }
 
     case 'ORDER_CREATED': {
-      const tableId =
-        typeof action.order.table === 'string'
-          ? action.order.table
-          : (action.order.table as Table)._id;
+      const tableId = getOrderTableId(action.order);
+      if (!tableId) return state;
       return {
         ...state,
         tableOrders: {
@@ -156,8 +154,17 @@ function liveReducer(state: LiveState, action: LiveAction): LiveState {
       return { ...state, tableAlerts: { ...state.tableAlerts, [action.tableId]: action.alert } };
 
     case 'ALERT_RESOLVED': {
-      const { [action.tableId]: _, ...rest } = state.tableAlerts;
-      return { ...state, tableAlerts: rest };
+      if (action.tableId) {
+        const { [action.tableId]: _, ...rest } = state.tableAlerts;
+        return { ...state, tableAlerts: rest };
+      }
+      if (action.notificationId) {
+        const nextAlerts = Object.fromEntries(
+          Object.entries(state.tableAlerts).filter(([, alert]) => alert.notificationId !== action.notificationId)
+        );
+        return { ...state, tableAlerts: nextAlerts };
+      }
+      return state;
     }
 
     case 'RESET':
@@ -166,6 +173,18 @@ function liveReducer(state: LiveState, action: LiveAction): LiveState {
     default:
       return state;
   }
+}
+
+function getOrderTableId(order: Order): string | null {
+  if (!order.table) return null;
+  if (typeof order.table === 'string') return order.table;
+  return (order.table as Table)._id ?? null;
+}
+
+function getNotificationTableId(notification: Notification): string | null {
+  if (!notification.table) return null;
+  if (typeof notification.table === 'string') return notification.table;
+  return (notification.table as Table)._id ?? null;
 }
 
 // ─── public types ───────────────────────────────────────────────────────────
@@ -228,7 +247,8 @@ export function useFloorPlan() {
   );
 
   const onNotificationNew = useCallback((notification: Notification) => {
-    const tableId = notification.table._id;
+    const tableId = getNotificationTableId(notification);
+    if (!tableId) return;
     dispatch({
       type: 'ALERT_NEW',
       tableId,
@@ -236,9 +256,13 @@ export function useFloorPlan() {
     });
   }, []);
 
-  const onNotificationResolved = useCallback((notification: Notification) => {
-    const tableId = typeof notification.table === 'string' ? notification.table : notification.table._id;
-    dispatch({ type: 'ALERT_RESOLVED', tableId });
+  const onNotificationResolved = useCallback((notification: Partial<Notification> & { notificationId?: string }) => {
+    const tableId = getNotificationTableId(notification as Notification);
+    dispatch({
+      type: 'ALERT_RESOLVED',
+      tableId: tableId ?? undefined,
+      notificationId: notification.notificationId ?? notification._id,
+    });
   }, []);
 
   const onFloorPlanUpdated = useCallback(() => {

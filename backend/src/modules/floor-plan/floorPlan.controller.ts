@@ -4,6 +4,7 @@ import { ApiResponse } from '../../common/response/ApiResponse';
 import { TableModel } from '../tables/table.model';
 import { RestaurantLayoutModel, IFloorDecoration, IZoneLayout } from './floorPlan.model';
 import { getIO } from '../../sockets';
+import { sortTablesByDisplayOrder } from '../tables/table.sort';
 
 interface TablePositionInput {
   tableId: string;
@@ -35,13 +36,14 @@ export class FloorPlanController {
 
       const [tables, layout] = await Promise.all([
         TableModel.find({ restaurant: restaurantId, isActive: true })
-          .sort({ zone: 1, name: 1 })
           .lean(),
         RestaurantLayoutModel.findOne({ restaurant: restaurantId }).lean(),
       ]);
 
+      const sortedTables = sortTablesByDisplayOrder(tables);
+
       // Derive zone names from tables (fallback when no layout exists yet)
-      const tableZones = [...new Set(tables.map((t) => t.zone).filter(Boolean) as string[])];
+      const tableZones = [...new Set(sortedTables.map((t) => t.zone).filter(Boolean) as string[])];
 
       const defaultZoneLayouts: IZoneLayout[] = tableZones.map((z) => ({
         zoneName: z,
@@ -51,7 +53,7 @@ export class FloorPlanController {
       }));
 
       ApiResponse.success(res, {
-        tables,
+        tables: sortedTables,
         layout: {
           background: layout?.background ?? 'default',
           zoneLayouts:

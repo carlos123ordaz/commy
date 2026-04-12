@@ -1,14 +1,23 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { Plus, Minus, Search, X, ChevronLeft } from 'lucide-react';
-import type { Order, Table, Category, Product } from '../../types';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ArrowRight,
+  Check,
+  ChevronLeft,
+  ClipboardList,
+  LayoutGrid,
+  Minus,
+  Plus,
+  Search,
+  ShoppingBag,
+  X,
+} from 'lucide-react';
+import type { Category, Order, Product, Table } from '../../types';
 import { api } from '../../config/api';
 import { Modal } from '../../components/ui/Modal';
 import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/format';
 import toast from 'react-hot-toast';
 import { cn } from '../../utils/cn';
-
-// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AccompanimentSelection {
   categoryId: string;
@@ -30,12 +39,9 @@ interface Props {
   onCreated: (order: Order) => void;
 }
 
-// A stable staff session UUID for the lifetime of the admin session
 const STAFF_SESSION_ID = crypto.randomUUID
   ? crypto.randomUUID()
   : '00000000-0000-4000-8000-000000000001';
-
-// ─── Component ────────────────────────────────────────────────────────────────
 
 export const CreateManualOrderModal: React.FC<Props> = ({ isOpen, onClose, onCreated }) => {
   const [tables, setTables] = useState<Table[]>([]);
@@ -50,22 +56,25 @@ export const CreateManualOrderModal: React.FC<Props> = ({ isOpen, onClose, onCre
   const [restaurantId, setRestaurantId] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [loadingMenu, setLoadingMenu] = useState(false);
-
-  // Accompaniment picker state
   const [pickingProduct, setPickingProduct] = useState<Product | null>(null);
   const [pendingAccompaniments, setPendingAccompaniments] = useState<Record<string, AccompanimentSelection>>({});
   const [accompanimentProducts, setAccompanimentProducts] = useState<Product[]>([]);
 
-  // Reset on open
   useEffect(() => {
     if (!isOpen) return;
+
     setStep('table');
     setSelectedTableId('');
+    setCategories([]);
+    setProducts([]);
     setCart([]);
     setNotes('');
     setSearch('');
+    setActiveCat('');
     setPickingProduct(null);
     setPendingAccompaniments({});
+    setAccompanimentProducts([]);
+
     api.get('/tables').then((res) => setTables(res.data.data)).catch(() => {});
     api.get('/restaurants/me/info').then((res) => setRestaurantId(res.data.data._id)).catch(() => {});
   }, [isOpen]);
@@ -77,35 +86,61 @@ export const CreateManualOrderModal: React.FC<Props> = ({ isOpen, onClose, onCre
         api.get(`/menu/public/${rId}/categories`),
         api.get(`/menu/public/${rId}/products`),
       ]);
-      setCategories(catRes.data.data);
+
+      const nextCategories = catRes.data.data;
+      setCategories(nextCategories);
       setProducts(prodRes.data.data);
-      setActiveCat(catRes.data.data[0]?._id ?? '');
+      setActiveCat(nextCategories[0]?._id ?? '');
     } catch {
-      toast.error('Error al cargar el menú');
+      toast.error('Error al cargar el menu');
     } finally {
       setLoadingMenu(false);
     }
   }, []);
 
+  const cartKey = (productId: string, acc: AccompanimentSelection[]) =>
+    `${productId}|${acc.map((a) => `${a.categoryId}:${a.productId}`).sort().join(',')}`;
+
+  const addSimpleToCart = (product: Product, accompaniments: AccompanimentSelection[]) => {
+    setCart((prev) => {
+      const key = cartKey(product._id, accompaniments);
+      const existing = prev.find((item) => cartKey(item.product._id, item.selectedAccompaniments) === key);
+
+      if (existing) {
+        return prev.map((item) =>
+          cartKey(item.product._id, item.selectedAccompaniments) === key
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+
+      return [...prev, { product, quantity: 1, notes: '', selectedAccompaniments: accompaniments }];
+    });
+  };
+
   const handleContinue = () => {
-    if (!selectedTableId) return toast.error('Selecciona una mesa');
+    if (!selectedTableId) {
+      toast.error('Selecciona una mesa');
+      return;
+    }
+
     setStep('menu');
     if (restaurantId) loadMenu(restaurantId);
   };
 
-  // ── Product click: if it has accompaniment categories, open picker ──────────
-
   const handleProductClick = async (product: Product) => {
     if (!product.isAvailable) return;
+
     if (product.productType === 'configurable' || product.productType === 'combo') {
-      toast.error('Los productos configurables/combo no están disponibles en órdenes manuales');
+      toast.error('Los productos configurables o combo no estan disponibles en ordenes manuales');
       return;
     }
+
     if (product.productType === 'menu') {
-      toast.error('Los productos tipo menú no están disponibles en órdenes manuales');
+      toast.error('Los productos tipo menu no estan disponibles en ordenes manuales');
       return;
     }
-    // simple product — may or may not have accompaniment categories
+
     if (product.accompanimentCategories && product.accompanimentCategories.length > 0) {
       try {
         const res = await api.get(`/menu/public/${restaurantId}/products/${product._id}`);
@@ -114,96 +149,97 @@ export const CreateManualOrderModal: React.FC<Props> = ({ isOpen, onClose, onCre
       } catch {
         setAccompanimentProducts([]);
       }
+
       setPickingProduct(product);
       setPendingAccompaniments({});
-    } else {
-      // Add directly to cart
-      addSimpleToCart(product, []);
+      return;
     }
+
+    addSimpleToCart(product, []);
   };
-
-  const addSimpleToCart = (product: Product, accompaniments: AccompanimentSelection[]) => {
-    setCart((prev) => {
-      // If already in cart with same accompaniments, increment qty
-      const key = cartKey(product._id, accompaniments);
-      const existing = prev.find((c) => cartKey(c.product._id, c.selectedAccompaniments) === key);
-      if (existing) {
-        return prev.map((c) =>
-          cartKey(c.product._id, c.selectedAccompaniments) === key
-            ? { ...c, quantity: c.quantity + 1 }
-            : c
-        );
-      }
-      return [...prev, { product, quantity: 1, notes: '', selectedAccompaniments: accompaniments }];
-    });
-  };
-
-  /** Stable key for a cart item (product + accompaniment combination) */
-  const cartKey = (productId: string, acc: AccompanimentSelection[]) =>
-    productId + '|' + acc.map((a) => a.categoryId + ':' + a.productId).sort().join(',');
-
-  // ── Accompaniment picker helpers ─────────────────────────────────────────────
 
   const accompanimentCategoryName = (catId: string) =>
-    categories.find((c) => c._id === catId)?.name ?? catId;
+    categories.find((category) => category._id === catId)?.name ?? catId;
 
   const productsForAccompanimentCat = (catId: string) =>
-    accompanimentProducts.filter((p) => {
-      const pCatId = typeof p.category === 'string' ? p.category : (p.category as Category)._id;
-      return pCatId === catId && p.isAvailable;
+    accompanimentProducts.filter((product) => {
+      const productCategoryId =
+        typeof product.category === 'string' ? product.category : (product.category as Category)._id;
+
+      return productCategoryId === catId && product.isAvailable;
     });
 
   const allAccompanimentsFilled = pickingProduct
-    ? (pickingProduct.accompanimentCategories ?? []).every(
-        (catId) => !!pendingAccompaniments[catId]
-      )
+    ? (pickingProduct.accompanimentCategories ?? []).every((catId) => !!pendingAccompaniments[catId])
     : false;
 
   const confirmAccompaniments = () => {
     if (!pickingProduct || !allAccompanimentsFilled) return;
+
     addSimpleToCart(pickingProduct, Object.values(pendingAccompaniments));
     setPickingProduct(null);
     setPendingAccompaniments({});
     setAccompanimentProducts([]);
   };
 
-  // ── Cart helpers ─────────────────────────────────────────────────────────────
+  const removeCartItem = (key: string) => {
+    setCart((prev) =>
+      prev.filter((item) => cartKey(item.product._id, item.selectedAccompaniments) !== key)
+    );
+  };
 
   const changeQty = (key: string, delta: number) => {
     setCart((prev) =>
       prev
-        .map((c) =>
-          cartKey(c.product._id, c.selectedAccompaniments) === key
-            ? { ...c, quantity: c.quantity + delta }
-            : c
+        .map((item) =>
+          cartKey(item.product._id, item.selectedAccompaniments) === key
+            ? { ...item, quantity: item.quantity + delta }
+            : item
         )
-        .filter((c) => c.quantity > 0)
+        .filter((item) => item.quantity > 0)
     );
   };
 
-  const cartTotal = cart.reduce((s, c) => s + c.product.price * c.quantity, 0);
+  const cartTotal = useMemo(
+    () => cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+    [cart]
+  );
 
-  const filteredProducts = products.filter((p) => {
-    const catId = typeof p.category === 'string' ? p.category : (p.category as Category)._id;
-    const matchesCat = !activeCat || catId === activeCat;
-    const matchesSearch = !search || p.name.toLowerCase().includes(search.toLowerCase());
-    return matchesCat && matchesSearch;
-  });
+  const cartUnits = useMemo(
+    () => cart.reduce((sum, item) => sum + item.quantity, 0),
+    [cart]
+  );
 
-  // ── Submit ───────────────────────────────────────────────────────────────────
+  const filteredProducts = useMemo(
+    () =>
+      products.filter((product) => {
+        const categoryId =
+          typeof product.category === 'string' ? product.category : (product.category as Category)._id;
+
+        const matchesCategory = !activeCat || categoryId === activeCat;
+        const matchesSearch = !search || product.name.toLowerCase().includes(search.toLowerCase());
+
+        return matchesCategory && matchesSearch;
+      }),
+    [products, activeCat, search]
+  );
+
+  const selectedTable = useMemo(
+    () => tables.find((table) => table._id === selectedTableId),
+    [tables, selectedTableId]
+  );
 
   const handleSubmit = async () => {
     if (!selectedTableId || cart.length === 0) return;
+
     setSubmitting(true);
     try {
-      // 1. Create the order (manual, starts as pending_confirmation)
       const orderRes = await api.post('/orders/manual', {
         tableId: selectedTableId,
         notes: notes || undefined,
       });
       const order: Order = orderRes.data.data;
 
-      // 2. Add each cart item
       for (const item of cart) {
         await api.post(`/orders/${order._id}/items`, {
           productId: item.product._id,
@@ -215,351 +251,579 @@ export const CreateManualOrderModal: React.FC<Props> = ({ isOpen, onClose, onCre
         });
       }
 
-      // 3. Return the fully populated order
       const finalRes = await api.get(`/orders/${order._id}`);
       onCreated(finalRes.data.data);
     } catch (err: unknown) {
-      const e = err as { response?: { data?: { message?: string } } };
-      toast.error(e.response?.data?.message || 'Error al crear pedido');
+      const error = err as { response?: { data?: { message?: string } } };
+      toast.error(error.response?.data?.message || 'Error al crear pedido');
     } finally {
       setSubmitting(false);
     }
   };
 
-  const freeTables = tables.filter((t) => t.status === 'free');
+  const freeTables = tables.filter((table) => table.status === 'free');
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  const modalTitle = pickingProduct ? (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-600">
+        Configurar producto
+      </p>
+      <h2 className="text-lg font-semibold text-slate-950">{pickingProduct.name}</h2>
+      <p className="text-sm text-slate-500">
+        Selecciona los acompanamientos requeridos antes de agregarlo al carrito.
+      </p>
+    </div>
+  ) : step === 'table' ? (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-600">
+        Pedido manual
+      </p>
+      <h2 className="text-lg font-semibold text-slate-950">Nueva orden manual</h2>
+      <p className="text-sm text-slate-500">
+        Define la mesa y arma el pedido con una interfaz pensada para caja y atencion.
+      </p>
+    </div>
+  ) : (
+    <div className="space-y-1">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary-600">
+        Pedido manual
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-lg font-semibold text-slate-950">Nueva orden manual</h2>
+        {selectedTable && (
+          <span className="inline-flex items-center rounded-md border border-primary-200 bg-primary-50 px-2 py-1 text-xs font-medium text-primary-700">
+            Mesa {selectedTable.name}
+          </span>
+        )}
+      </div>
+      <p className="text-sm text-slate-500">
+        Busca, agrega y confirma sin salir del flujo operativo.
+      </p>
+    </div>
+  );
+
+  const footer = pickingProduct ? (
+    <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="text-sm text-slate-500">
+        {Object.keys(pendingAccompaniments).length}
+        {' / '}
+        {pickingProduct.accompanimentCategories?.length ?? 0}
+        {' '}selecciones completas
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button
+          variant="ghost"
+          onClick={() => {
+            setPickingProduct(null);
+            setAccompanimentProducts([]);
+          }}
+        >
+          <ChevronLeft size={14} className="mr-1" />
+          Cancelar
+        </Button>
+        <Button variant="primary" disabled={!allAccompanimentsFilled} onClick={confirmAccompaniments}>
+          Agregar al carrito
+        </Button>
+      </div>
+    </div>
+  ) : step === 'table' ? (
+    <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-slate-500">
+        {selectedTable ? `Mesa lista: ${selectedTable.name}` : 'Selecciona una mesa para continuar'}
+      </p>
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" onClick={onClose}>
+          Cancelar
+        </Button>
+        <Button variant="primary" onClick={handleContinue} disabled={!selectedTableId}>
+          Continuar
+          <ArrowRight size={14} className="ml-1" />
+        </Button>
+      </div>
+    </div>
+  ) : (
+    <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Total actual</p>
+        <div className="mt-1 flex items-end gap-3">
+          <span className="text-2xl font-semibold text-slate-950">{formatCurrency(cartTotal)}</span>
+          <span className="pb-1 text-sm text-slate-500">
+            {cartUnits} item{cartUnits !== 1 ? 's' : ''}
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="ghost" onClick={() => setStep('table')}>
+          <ChevronLeft size={14} className="mr-1" />
+          Atras
+        </Button>
+        <Button
+          variant="primary"
+          loading={submitting}
+          disabled={cart.length === 0}
+          onClick={handleSubmit}
+          className="min-w-[180px]"
+        >
+          Crear pedido
+        </Button>
+      </div>
+    </div>
+  );
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={
-        pickingProduct
-          ? `Acompañamientos — ${pickingProduct.name}`
-          : step === 'table'
-            ? 'Nueva Orden Manual'
-            : 'Nueva Orden Manual'
-      }
-      size={step === 'menu' ? 'xl' : 'sm'}
-      footer={
-        pickingProduct ? (
-          <>
-            <Button variant="secondary" onClick={() => { setPickingProduct(null); setAccompanimentProducts([]); }}>
-              <ChevronLeft size={14} className="mr-1" />Cancelar
-            </Button>
-            <Button
-              variant="primary"
-              disabled={!allAccompanimentsFilled}
-              onClick={confirmAccompaniments}
-            >
-              Agregar al carrito
-            </Button>
-          </>
-        ) : step === 'table' ? (
-          <>
-            <Button variant="secondary" onClick={onClose}>Cancelar</Button>
-            <Button variant="primary" onClick={handleContinue} disabled={!selectedTableId}>
-              Continuar
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button variant="secondary" onClick={() => setStep('table')}>← Atrás</Button>
-            <Button
-              variant="primary"
-              loading={submitting}
-              disabled={cart.length === 0}
-              onClick={handleSubmit}
-            >
-              Crear pedido ({formatCurrency(cartTotal)})
-            </Button>
-          </>
-        )
-      }
+      title={modalTitle}
+      size={step === 'menu' ? '4xl' : 'lg'}
+      footer={footer}
+      headerClassName="border-slate-200 bg-gradient-to-r from-white via-white to-slate-50"
+      contentClassName={cn('px-4 py-4 sm:px-6 sm:py-5', step === 'menu' && !pickingProduct && 'overflow-hidden')}
+      footerClassName="border-slate-200 bg-gradient-to-r from-slate-50 to-white"
+      className="border border-slate-200/80"
     >
-      {/* ── Accompaniment picker overlay ── */}
       {pickingProduct && (
         <div className="space-y-5">
           {(pickingProduct.accompanimentCategories ?? []).map((catId) => {
             const catName = accompanimentCategoryName(catId);
             const catProducts = productsForAccompanimentCat(catId);
             const selected = pendingAccompaniments[catId];
+
             return (
-              <div key={catId}>
-                <p className="text-sm font-semibold text-slate-800 mb-2">
-                  {catName}
-                  <span className="ml-2 text-xs font-normal text-red-500">*requerido</span>
-                </p>
+              <section key={catId} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                <div className="mb-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{catName}</p>
+                    <p className="text-xs text-slate-500">Seleccion obligatoria</p>
+                  </div>
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500">
+                    1 opcion
+                  </span>
+                </div>
+
                 {catProducts.length === 0 ? (
-                  <p className="text-xs text-slate-400 bg-slate-50 rounded-xl p-3">
-                    No hay productos disponibles en esta categoría
-                  </p>
+                  <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-5 text-sm text-slate-400">
+                    No hay productos disponibles en esta categoria.
+                  </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {catProducts.map((p) => (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {catProducts.map((product) => (
                       <button
-                        key={p._id}
+                        key={product._id}
                         onClick={() =>
                           setPendingAccompaniments((prev) => ({
                             ...prev,
                             [catId]: {
                               categoryId: catId,
                               categoryName: catName,
-                              productId: p._id,
-                              productName: p.name,
+                              productId: product._id,
+                              productName: product.name,
                             },
                           }))
                         }
                         className={cn(
-                          'p-3 rounded-xl border-2 text-left text-sm transition-all',
-                          selected?.productId === p._id
-                            ? 'border-primary-500 bg-primary-50 text-primary-700'
-                            : 'border-slate-200 text-slate-700 hover:border-slate-300'
+                          'group rounded-2xl border bg-white px-4 py-3 text-left transition-all duration-150',
+                          selected?.productId === product._id
+                            ? 'border-primary-300 bg-primary-50/70 shadow-sm ring-1 ring-primary-100'
+                            : 'border-slate-200 hover:border-slate-300 hover:shadow-sm'
                         )}
                       >
-                        <p className="font-medium leading-tight">{p.name}</p>
-                        {p.description && (
-                          <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{p.description}</p>
-                        )}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{product.name}</p>
+                            {product.description && (
+                              <p className="mt-1 line-clamp-2 text-xs text-slate-500">{product.description}</p>
+                            )}
+                          </div>
+                          <span
+                            className={cn(
+                              'mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border',
+                              selected?.productId === product._id
+                                ? 'border-primary-500 bg-primary-600 text-white'
+                                : 'border-slate-300 bg-white text-transparent group-hover:text-slate-300'
+                            )}
+                          >
+                            <Check size={12} />
+                          </span>
+                        </div>
                       </button>
                     ))}
                   </div>
                 )}
-              </div>
+              </section>
             );
           })}
         </div>
       )}
 
-      {/* ── Step: table selection ── */}
       {!pickingProduct && step === 'table' && (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">Selecciona la mesa para la orden manual:</p>
-          {freeTables.length === 0 ? (
-            <p className="text-slate-400 text-sm text-center py-6">No hay mesas libres disponibles</p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto">
-              {freeTables.map((t) => (
-                <button
-                  key={t._id}
-                  onClick={() => setSelectedTableId(t._id)}
-                  className={`p-3 rounded-xl border-2 text-sm font-medium transition-all ${
-                    selectedTableId === t._id
-                      ? 'border-primary-500 bg-primary-50 text-primary-700'
-                      : 'border-slate-200 text-slate-700 hover:border-slate-300'
-                  }`}
-                >
-                  {t.name}
-                  {t.zone && <span className="block text-xs text-slate-400 font-normal">{t.zone}</span>}
-                </button>
-              ))}
-            </div>
-          )}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Notas del pedido (opcional)</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={2}
-              className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-              placeholder="Instrucciones especiales..."
-            />
-          </div>
-        </div>
-      )}
-
-      {/* ── Step: menu ── */}
-      {!pickingProduct && step === 'menu' && (
-        <div className="flex flex-col sm:flex-row gap-4 sm:h-[60vh]">
-
-          {/* ── Menu panel ── */}
-          <div className="flex-1 flex flex-col min-w-0">
-            {/* Search */}
-            <div className="relative mb-3">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input
-                value={search}
-                onChange={(e) => { setSearch(e.target.value); setActiveCat(''); }}
-                placeholder="Buscar producto..."
-                className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-              />
+        <div className="space-y-5">
+          <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 sm:p-5">
+            <div className="mb-4 flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
+                <ClipboardList size={18} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-slate-950">Seleccion de mesa</p>
+                <p className="text-sm text-slate-500">
+                  Elige una mesa libre y deja notas operativas si hacen falta.
+                </p>
+              </div>
             </div>
 
-            {/* Categories - horizontal scroll on mobile */}
-            <div className="flex gap-1.5 overflow-x-auto pb-1 mb-3 no-scrollbar">
-              {categories.map((cat) => (
-                <button
-                  key={cat._id}
-                  onClick={() => { setActiveCat(cat._id); setSearch(''); }}
-                  className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                    activeCat === cat._id
-                      ? 'bg-primary-600 text-white'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                  }`}
-                >
-                  {cat.name}
-                </button>
-              ))}
-            </div>
-
-            {/* Products - bounded height on mobile, flex-1 on desktop */}
-            {loadingMenu ? (
-              <div className="grid grid-cols-2 gap-2 max-h-52 sm:max-h-none sm:flex-1 sm:overflow-y-auto">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className="skeleton h-20 rounded-xl" />
-                ))}
+            {freeTables.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-400">
+                No hay mesas libres disponibles.
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 content-start max-h-52 sm:max-h-none overflow-y-auto sm:flex-1">
-                {filteredProducts.map((p) => {
-                  const isUnsupported =
-                    p.productType === 'configurable' ||
-                    p.productType === 'combo' ||
-                    p.productType === 'menu';
-                  const inCart = cart.filter((c) => c.product._id === p._id);
-                  const totalQty = inCart.reduce((s, c) => s + c.quantity, 0);
-                  const hasAccompaniments =
-                    p.accompanimentCategories && p.accompanimentCategories.length > 0;
+              <div className="grid max-h-[320px] grid-cols-2 gap-2.5 overflow-y-auto pr-1 sm:grid-cols-3">
+                {freeTables.map((table) => {
+                  const isSelected = selectedTableId === table._id;
 
                   return (
                     <button
-                      key={p._id}
-                      onClick={() => handleProductClick(p)}
-                      disabled={!p.isAvailable || isUnsupported}
-                      title={isUnsupported ? 'Tipo no soportado en órdenes manuales' : undefined}
+                      key={table._id}
+                      onClick={() => setSelectedTableId(table._id)}
                       className={cn(
-                        'p-3 text-left rounded-xl border transition-all',
-                        !p.isAvailable || isUnsupported
-                          ? 'opacity-40 cursor-not-allowed border-slate-100'
-                          : totalQty > 0
-                            ? 'border-primary-300 bg-primary-50'
-                            : 'border-slate-100 hover:border-slate-300 hover:shadow-sm'
+                        'group rounded-2xl border bg-white px-4 py-3 text-left transition-all duration-150',
+                        isSelected
+                          ? 'border-primary-300 bg-primary-50/70 shadow-sm ring-1 ring-primary-100'
+                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
                       )}
                     >
-                      <p className="text-sm font-medium text-slate-800 leading-tight">{p.name}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{formatCurrency(p.price)}</p>
-                      <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                        {hasAccompaniments && (
-                          <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-md font-medium">
-                            + acomp.
-                          </span>
-                        )}
-                        {totalQty > 0 && (
-                          <span className="text-xs bg-primary-100 text-primary-700 px-1.5 py-0.5 rounded-md font-semibold">
-                            ×{totalQty}
-                          </span>
-                        )}
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-slate-900">{table.name}</p>
+                          <p className="mt-1 text-xs text-slate-500">{table.zone || 'Salon principal'}</p>
+                        </div>
+                        <span
+                          className={cn(
+                            'mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border',
+                            isSelected
+                              ? 'border-primary-500 bg-primary-600 text-white'
+                              : 'border-slate-300 bg-white text-transparent group-hover:text-slate-300'
+                          )}
+                        >
+                          <Check size={12} />
+                        </span>
                       </div>
                     </button>
                   );
                 })}
               </div>
             )}
-          </div>
+          </section>
 
-          {/* ── Cart panel - desktop sidebar ── */}
-          <div className="hidden sm:flex w-56 flex-col border-l border-slate-100 pl-4">
-            <p className="text-sm font-semibold text-slate-800 mb-3">
-              Carrito {cart.length > 0 && `(${cart.length})`}
-            </p>
-            {cart.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center mt-8">Sin productos</p>
-            ) : (
-              <div className="flex-1 space-y-2 overflow-y-auto">
-                {cart.map((item) => {
-                  const key = cartKey(item.product._id, item.selectedAccompaniments);
-                  return (
-                    <div key={key} className="bg-slate-50 rounded-lg p-2">
-                      <div className="flex items-start justify-between gap-1">
-                        <p className="text-xs font-medium text-slate-800 flex-1 leading-tight">
-                          {item.product.name}
-                        </p>
-                        <button
-                          onClick={() => setCart((prev) => prev.filter((c) => cartKey(c.product._id, c.selectedAccompaniments) !== key))}
-                          className="text-slate-300 hover:text-red-400 flex-shrink-0"
-                        >
-                          <X size={12} />
-                        </button>
-                      </div>
-                      {item.selectedAccompaniments.length > 0 && (
-                        <div className="mt-0.5 space-y-0.5">
-                          {item.selectedAccompaniments.map((a) => (
-                            <p key={a.categoryId} className="text-xs text-slate-500">
-                              {a.categoryName}: <span className="font-medium">{a.productName}</span>
-                            </p>
-                          ))}
-                        </div>
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <label className="mb-2 block text-sm font-medium text-slate-800">Notas del pedido</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              rows={3}
+              className="w-full resize-none rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-800 outline-none transition-all placeholder:text-slate-400 focus:border-primary-300 focus:bg-white focus:ring-4 focus:ring-primary-100"
+              placeholder="Ejemplo: sin cebolla, salida prioritaria, cliente espera acompanamiento."
+            />
+          </section>
+        </div>
+      )}
+
+      {!pickingProduct && step === 'menu' && (
+        <div className="flex h-[72vh] min-h-[560px] min-w-0 min-h-0 flex-col gap-4 lg:flex-row">
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-950">Catalogo</p>
+                    <p className="text-sm text-slate-500">
+                      {filteredProducts.length} producto{filteredProducts.length !== 1 ? 's' : ''} disponibles
+                    </p>
+                  </div>
+                  <div className="hidden items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 sm:flex">
+                    <LayoutGrid size={14} />
+                    Flujo rapido
+                  </div>
+                </div>
+
+                <div className="relative">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setActiveCat('');
+                    }}
+                    placeholder="Buscar producto por nombre"
+                    className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-primary-300 focus:bg-white focus:ring-4 focus:ring-primary-100"
+                  />
+                </div>
+
+                <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                  <button
+                    onClick={() => {
+                      setActiveCat('');
+                      setSearch('');
+                    }}
+                    className={cn(
+                      'whitespace-nowrap rounded-xl border px-3 py-2 text-xs font-medium transition-all',
+                      !activeCat && !search
+                        ? 'border-slate-900 bg-slate-900 text-white shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
+                    )}
+                  >
+                    Todo
+                  </button>
+                  {categories.map((category) => (
+                    <button
+                      key={category._id}
+                      onClick={() => {
+                        setActiveCat(category._id);
+                        setSearch('');
+                      }}
+                      className={cn(
+                        'whitespace-nowrap rounded-xl border px-3 py-2 text-xs font-medium transition-all',
+                        activeCat === category._id
+                          ? 'border-primary-300 bg-primary-50 text-primary-700 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'
                       )}
-                      <p className="text-xs text-slate-500 mt-0.5">
-                        {formatCurrency(item.product.price * item.quantity)}
-                      </p>
-                      <div className="flex items-center gap-2 mt-1.5">
-                        <button onClick={() => changeQty(key, -1)} className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-300">
-                          <Minus size={10} />
-                        </button>
-                        <span className="text-xs font-medium text-slate-700 w-4 text-center">{item.quantity}</span>
-                        <button onClick={() => changeQty(key, 1)} className="w-5 h-5 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-300">
-                          <Plus size={10} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-            {cart.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="flex justify-between text-sm font-semibold text-slate-900">
-                  <span>Total</span>
-                  <span>{formatCurrency(cartTotal)}</span>
+                    >
+                      {category.name}
+                    </button>
+                  ))}
                 </div>
               </div>
-            )}
-          </div>
+            </div>
 
-          {/* ── Cart panel - mobile (below products) ── */}
-          {cart.length > 0 && (
-            <div className="sm:hidden border-t border-slate-100 pt-3">
-              <p className="text-sm font-semibold text-slate-800 mb-2">
-                Carrito ({cart.reduce((s, c) => s + c.quantity, 0)} ítem{cart.reduce((s, c) => s + c.quantity, 0) !== 1 ? 's' : ''})
-              </p>
-              <div className="space-y-2 max-h-44 overflow-y-auto">
-                {cart.map((item) => {
-                  const key = cartKey(item.product._id, item.selectedAccompaniments);
-                  return (
-                    <div key={key} className="flex items-center gap-3 bg-slate-50 rounded-xl px-3 py-2">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-slate-800 truncate">{item.product.name}</p>
-                        {item.selectedAccompaniments.length > 0 && (
-                          <p className="text-xs text-slate-400 truncate">
-                            {item.selectedAccompaniments.map((a) => a.productName).join(', ')}
-                          </p>
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+              {loadingMenu ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 9 }).map((_, index) => (
+                    <div key={index} className="skeleton h-36 rounded-2xl" />
+                  ))}
+                </div>
+              ) : filteredProducts.length === 0 ? (
+                <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 text-center">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">No se encontraron productos</p>
+                    <p className="mt-1 text-sm text-slate-500">Ajusta la busqueda o cambia la categoria.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {filteredProducts.map((product) => {
+                    const isUnsupported =
+                      product.productType === 'configurable' ||
+                      product.productType === 'combo' ||
+                      product.productType === 'menu';
+                    const productEntries = cart.filter((item) => item.product._id === product._id);
+                    const totalQty = productEntries.reduce((sum, item) => sum + item.quantity, 0);
+                    const hasAccompaniments = (product.accompanimentCategories ?? []).length > 0;
+                    const disabled = !product.isAvailable || isUnsupported;
+
+                    return (
+                      <button
+                        key={product._id}
+                        onClick={() => handleProductClick(product)}
+                        disabled={disabled}
+                        title={isUnsupported ? 'Tipo no soportado en ordenes manuales' : undefined}
+                        className={cn(
+                          'group relative flex min-h-[152px] flex-col rounded-2xl border px-4 py-3 text-left transition-all duration-150',
+                          disabled
+                            ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-50'
+                            : totalQty > 0
+                              ? 'border-primary-300 bg-gradient-to-br from-primary-50 via-white to-primary-50/60 shadow-sm ring-1 ring-primary-100'
+                              : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md'
                         )}
-                        <p className="text-xs text-slate-500">{formatCurrency(item.product.price * item.quantity)}</p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        <button onClick={() => changeQty(key, -1)} className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-300">
-                          <Minus size={11} />
-                        </button>
-                        <span className="text-sm font-semibold text-slate-700 w-5 text-center">{item.quantity}</span>
-                        <button onClick={() => changeQty(key, 1)} className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 hover:bg-slate-300">
-                          <Plus size={11} />
-                        </button>
-                        <button
-                          onClick={() => setCart((prev) => prev.filter((c) => cartKey(c.product._id, c.selectedAccompaniments) !== key))}
-                          className="w-6 h-6 rounded-full flex items-center justify-center text-slate-300 hover:text-red-400 hover:bg-red-50"
-                        >
-                          <X size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                      >
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="line-clamp-2 text-sm font-semibold leading-5 text-slate-900">
+                              {product.name}
+                            </p>
+                            {product.description && (
+                              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                                {product.description}
+                              </p>
+                            )}
+                          </div>
+
+                          {totalQty > 0 && (
+                            <span className="inline-flex min-w-[34px] justify-center rounded-lg bg-slate-900 px-2 py-1 text-xs font-semibold text-white shadow-sm">
+                              x{totalQty}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-auto space-y-3">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-semibold text-slate-950">
+                              {formatCurrency(product.price)}
+                            </span>
+                            {hasAccompaniments && (
+                              <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+                                Requiere seleccion
+                              </span>
+                            )}
+                            {disabled && (
+                              <span className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-500">
+                                No disponible
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                              <span
+                                className={cn(
+                                  'h-1.5 w-1.5 rounded-full',
+                                  totalQty > 0 ? 'bg-primary-500' : 'bg-slate-300'
+                                )}
+                              />
+                              {totalQty > 0 ? 'Ya agregado' : 'Listo para agregar'}
+                            </div>
+                            <span
+                              className={cn(
+                                'inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all',
+                                disabled
+                                  ? 'border border-slate-200 bg-white text-slate-400'
+                                  : totalQty > 0
+                                    ? 'bg-primary-600 text-white'
+                                    : 'border border-slate-200 bg-slate-50 text-slate-700 group-hover:border-slate-300 group-hover:bg-white'
+                              )}
+                            >
+                              <Plus size={12} />
+                              Agregar
+                            </span>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <aside className="flex min-h-0 w-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 via-white to-white lg:w-[360px]">
+            <div className="border-b border-slate-200 px-4 py-4 sm:px-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <ShoppingBag size={16} className="text-slate-700" />
+                    <p className="text-sm font-semibold text-slate-950">Carrito</p>
+                  </div>
+                  <p className="mt-1 text-sm text-slate-500">
+                    {cartUnits} item{cartUnits !== 1 ? 's' : ''} preparados para confirmar
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-right shadow-sm">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Total</p>
+                  <p className="mt-1 text-lg font-semibold text-slate-950">{formatCurrency(cartTotal)}</p>
+                </div>
               </div>
             </div>
-          )}
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5">
+              {cart.length === 0 ? (
+                <div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-white px-6 text-center">
+                  <div>
+                    <p className="text-sm font-medium text-slate-700">El carrito esta vacio</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Agrega productos desde el catalogo para construir el pedido.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {cart.map((item) => {
+                    const key = cartKey(item.product._id, item.selectedAccompaniments);
 
+                    return (
+                      <div
+                        key={key}
+                        className="animate-fade-in rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold leading-5 text-slate-900">
+                              {item.product.name}
+                            </p>
+                            {item.selectedAccompaniments.length > 0 && (
+                              <div className="mt-1 space-y-1">
+                                {item.selectedAccompaniments.map((selection) => (
+                                  <p key={selection.categoryId} className="text-xs leading-4 text-slate-500">
+                                    {selection.categoryName}: {selection.productName}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            onClick={() => removeCartItem(key)}
+                            className="rounded-lg p-1.5 text-slate-300 transition-all hover:bg-red-50 hover:text-red-500"
+                            aria-label={`Eliminar ${item.product.name}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between gap-3">
+                          <div className="inline-flex items-center rounded-xl border border-slate-200 bg-slate-50 p-1">
+                            <button
+                              onClick={() => changeQty(key, -1)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 transition-all hover:bg-white hover:shadow-sm"
+                              aria-label={`Restar ${item.product.name}`}
+                            >
+                              <Minus size={14} />
+                            </button>
+                            <span className="w-8 text-center text-sm font-semibold text-slate-900">
+                              {item.quantity}
+                            </span>
+                            <button
+                              onClick={() => changeQty(key, 1)}
+                              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 transition-all hover:bg-white hover:shadow-sm"
+                              aria-label={`Sumar ${item.product.name}`}
+                            >
+                              <Plus size={14} />
+                            </button>
+                          </div>
+
+                          <div className="text-right">
+                            <p className="text-xs text-slate-500">
+                              {item.quantity} x {formatCurrency(item.product.price)}
+                            </p>
+                            <p className="text-sm font-semibold text-slate-950">
+                              {formatCurrency(item.product.price * item.quantity)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="border-t border-slate-200 bg-white/90 px-4 py-4 sm:px-5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500">Subtotal</span>
+                  <span className="font-medium text-slate-700">{formatCurrency(cartTotal)}</span>
+                </div>
+                <div className="mt-3 flex items-end justify-between">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                      Total a confirmar
+                    </p>
+                    <p className="mt-1 text-2xl font-semibold text-slate-950">{formatCurrency(cartTotal)}</p>
+                  </div>
+                  <span className="rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white">
+                    {cartUnits} item{cartUnits !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </aside>
         </div>
       )}
     </Modal>

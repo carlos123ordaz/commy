@@ -5,6 +5,7 @@ import { NotFoundError } from '../../common/errors/AppError';
 import { generateQRDataURL } from '../../utils/qrcode.utils';
 import { generateQRPDF, QRTableData } from '../../utils/pdf.utils';
 import { env } from '../../config/env';
+import { sortTablesByDisplayOrder } from './table.sort';
 
 export class TableService {
   private buildQrUrl(qrCode: string): string {
@@ -29,7 +30,8 @@ export class TableService {
   async findAll(restaurantId: string, zone?: string) {
     const query: Record<string, unknown> = { restaurant: restaurantId, isActive: true };
     if (zone) query.zone = zone;
-    return TableModel.find(query).sort({ zone: 1, name: 1 });
+    const tables = await TableModel.find(query).lean();
+    return sortTablesByDisplayOrder(tables);
   }
 
   async findById(id: string, restaurantId: string) {
@@ -102,9 +104,11 @@ export class TableService {
   async exportAllToPdf(restaurantId: string) {
     const tables = await TableModel.find({ restaurant: restaurantId, isActive: true })
       .populate('restaurant', 'name')
-      .sort({ zone: 1, name: 1 });
+      .lean();
 
-    const qrData: QRTableData[] = tables.map((t) => ({
+    const sortedTables = sortTablesByDisplayOrder(tables);
+
+    const qrData: QRTableData[] = sortedTables.map((t) => ({
       tableName: t.name,
       qrUrl: t.qrUrl,
       restaurantName: (t.restaurant as unknown as { name: string }).name || 'Commy',
