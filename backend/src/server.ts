@@ -5,8 +5,6 @@ import { connectDatabase } from './config/database';
 import { initializeSockets } from './sockets';
 
 async function bootstrap() {
-  await connectDatabase();
-
   const server = http.createServer(app);
   initializeSockets(server);
 
@@ -19,6 +17,8 @@ async function bootstrap() {
    Health:  http://localhost:${env.PORT}/health
     `);
   });
+
+  await connectDatabase();
 
   const shutdown = async (signal: string) => {
     console.log(`\n${signal} received. Shutting down gracefully...`);

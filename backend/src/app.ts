@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import morgan from 'morgan';
 import { env } from './config/env';
-import { globalRateLimiter } from './middleware/rateLimiter';
+
 import { errorMiddleware, notFoundMiddleware } from './middleware/error.middleware';
 
 // Routes
@@ -20,16 +20,17 @@ import customerRoutes from './modules/customers/customer.routes';
 
 const app = express();
 
+const corsOptions = {
+  origin: [env.ADMIN_APP_URL, env.CUSTOMER_APP_URL],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
 // Security
-app.use(helmet());
-app.use(
-  cors({
-    origin: [env.ADMIN_APP_URL, env.CUSTOMER_APP_URL],
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+app.use(helmet({ crossOriginResourcePolicy: false }));
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 
 // Logging
 if (env.isDev) {
@@ -41,9 +42,6 @@ if (env.isDev) {
 // Body parsing
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
-// Rate limiting
-app.use(globalRateLimiter);
 
 // Health check
 app.get('/health', (_req, res) => {

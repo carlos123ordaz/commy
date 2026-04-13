@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useReducer, useState } from 're
 import {
   ArrowRight,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   CircleDashed,
   Clock3,
   LayoutGrid,
@@ -25,6 +23,7 @@ import toast from 'react-hot-toast';
 import type { Order, OrderItem, OrderStatus, OrderType } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { OrderStatusBadge } from '../../components/ui/Badge';
+import { Modal } from '../../components/ui/Modal';
 import { api } from '../../config/api';
 import { useSocketStore } from '../../store/socketStore';
 import { cn } from '../../utils/cn';
@@ -292,15 +291,17 @@ function OrderDetail({
   order,
   updatingId,
   onChangeStatus,
+  standalone = false,
 }: {
   order: Order;
   updatingId: string | null;
   onChangeStatus: (orderId: string, status: OrderStatus) => void;
+  standalone?: boolean;
 }) {
   const actions = getNextActions(order.status);
 
   return (
-    <div className="border-t border-slate-200 bg-slate-50/70 px-4 py-3">
+    <div className={cn(standalone ? 'space-y-3' : 'border-t border-slate-200 bg-slate-50/70 px-4 py-3')}>
       <div className="space-y-3">
         {order.customerInfo && (
           <div className="grid gap-2">
@@ -375,6 +376,20 @@ function OrderDetail({
                   ))}
                 </div>
               )}
+
+              {item.selectedAccompaniments.length > 0 && (
+                <div className="mt-1 space-y-1">
+                  {item.selectedAccompaniments.map((accompaniment, index) => (
+                    <p
+                      key={`${accompaniment.categoryId}-${accompaniment.productId}-${index}`}
+                      className="text-xs text-slate-500"
+                    >
+                      <span className="font-medium text-slate-600">{accompaniment.categoryName}:</span>{' '}
+                      {accompaniment.productName}
+                    </p>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -410,15 +425,13 @@ function OrderDetail({
 
 function KanbanOrderCard({
   order,
-  expanded,
   updatingId,
-  onToggle,
+  onOpen,
   onChangeStatus,
 }: {
   order: Order;
-  expanded: boolean;
   updatingId: string | null;
-  onToggle: () => void;
+  onOpen: () => void;
   onChangeStatus: (orderId: string, status: OrderStatus) => void;
 }) {
   const elapsed = getElapsedMeta(order);
@@ -428,8 +441,17 @@ function KanbanOrderCard({
 
   return (
     <article
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
       className={cn(
-        'rounded-xl border bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md',
+        'rounded-xl border bg-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-md cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary-500/30',
         elapsed.accentClass
       )}
     >
@@ -479,7 +501,10 @@ function KanbanOrderCard({
                 size="sm"
                 icon={primaryAction.icon}
                 loading={updatingId === order._id}
-                onClick={() => onChangeStatus(order._id, primaryAction.newStatus)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onChangeStatus(order._id, primaryAction.newStatus);
+                }}
                 className="h-10 justify-between rounded-lg px-3 text-sm shadow-sm"
               >
                 <span>{primaryAction.label}</span>
@@ -487,27 +512,31 @@ function KanbanOrderCard({
               </Button>
               <button
                 type="button"
-                onClick={onToggle}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpen();
+                }}
                 className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 bg-white px-3 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-700"
-                aria-label={expanded ? 'Ocultar detalle' : 'Ver detalle'}
+                aria-label="Ver detalle"
               >
-                {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <List size={16} />
               </button>
             </div>
           ) : (
             <button
               type="button"
-              onClick={onToggle}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpen();
+              }}
               className="mt-4 inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-800"
             >
-              {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-              {expanded ? 'Ocultar detalle' : 'Ver detalle'}
+              <List size={16} />
+              Ver detalle
             </button>
           )}
         </div>
       </div>
-
-      {expanded && <OrderDetail order={order} updatingId={updatingId} onChangeStatus={onChangeStatus} />}
     </article>
   );
 }
@@ -517,7 +546,7 @@ export const OrdersLivePage: React.FC = () => {
   const [orders, dispatch] = useReducer(reducer, []);
   const ordersRef = React.useRef(orders);
   const [loading, setLoading] = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>(() =>
@@ -595,9 +624,13 @@ export const OrdersLivePage: React.FC = () => {
 
   const handleViewMode = (mode: ViewMode) => {
     setViewMode(mode);
-    setExpandedId(null);
     localStorage.setItem('orders_view', mode);
   };
+
+  const selectedOrder = useMemo(
+    () => orders.find((order) => order._id === selectedOrderId) ?? null,
+    [orders, selectedOrderId]
+  );
 
   const ordersByColumn = useMemo(() => {
     return COLUMNS.reduce<Record<OrderStatus, Order[]>>((acc, column) => {
@@ -648,9 +681,8 @@ export const OrdersLivePage: React.FC = () => {
                   <KanbanOrderCard
                     key={order._id}
                     order={order}
-                    expanded={expandedId === order._id}
                     updatingId={updatingId}
-                    onToggle={() => setExpandedId(expandedId === order._id ? null : order._id)}
+                    onOpen={() => setSelectedOrderId(order._id)}
                     onChangeStatus={changeStatus}
                   />
                 ))
@@ -691,16 +723,13 @@ export const OrdersLivePage: React.FC = () => {
                 const typeMeta = getOrderTypeMeta(order.orderType);
                 const actions = getNextActions(order.status);
                 const primaryAction = actions[0];
-                const expanded = expandedId === order._id;
 
                 return (
-                  <React.Fragment key={order._id}>
-                    <tr
-                      className={cn(
-                        'border-b border-slate-100 transition-colors',
-                        expanded ? 'bg-slate-50/80' : 'hover:bg-slate-50/50'
-                      )}
-                    >
+                  <tr
+                    key={order._id}
+                    className="border-b border-slate-100 transition-colors hover:bg-slate-50/50 cursor-pointer"
+                    onClick={() => setSelectedOrderId(order._id)}
+                  >
                       <td className="px-4 py-4">
                         <div className="flex items-center gap-3">
                           <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold', typeMeta.badgeClass)}>
@@ -735,7 +764,10 @@ export const OrdersLivePage: React.FC = () => {
                               size="sm"
                               icon={primaryAction.icon}
                               loading={updatingId === order._id}
-                              onClick={() => changeStatus(order._id, primaryAction.newStatus)}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                changeStatus(order._id, primaryAction.newStatus);
+                              }}
                               className="rounded-lg"
                             >
                               {primaryAction.label}
@@ -743,23 +775,17 @@ export const OrdersLivePage: React.FC = () => {
                           )}
                           <button
                             type="button"
-                            onClick={() => setExpandedId(expanded ? null : order._id)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setSelectedOrderId(order._id);
+                            }}
                             className="inline-flex h-8 items-center justify-center rounded-lg border border-slate-200 px-3 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
                           >
-                            {expanded ? 'Ocultar' : 'Detalle'}
+                            Detalle
                           </button>
                         </div>
                       </td>
                     </tr>
-
-                    {expanded && (
-                      <tr className="border-b border-slate-100 bg-slate-50/70">
-                        <td colSpan={6} className="px-4 pb-4">
-                          <OrderDetail order={order} updatingId={updatingId} onChangeStatus={changeStatus} />
-                        </td>
-                      </tr>
-                    )}
-                  </React.Fragment>
                 );
               })}
             </tbody>
@@ -835,6 +861,51 @@ export const OrdersLivePage: React.FC = () => {
       </header>
 
       {viewMode === 'kanban' ? KanbanView : ListView}
+
+      <Modal
+        isOpen={!!selectedOrder}
+        onClose={() => setSelectedOrderId(null)}
+        size="3xl"
+        title={
+          selectedOrder ? (
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={cn('inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold', getOrderTypeMeta(selectedOrder.orderType).badgeClass)}>
+                    {getOrderTypeMeta(selectedOrder.orderType).icon}
+                    {getOrderTypeMeta(selectedOrder.orderType).label}
+                  </span>
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                    #{selectedOrder.orderNumber}
+                  </span>
+                  <OrderStatusBadge status={selectedOrder.status} />
+                </div>
+                <div>
+                  <p className="text-lg font-semibold text-slate-950">{getPrimaryCustomer(selectedOrder)}</p>
+                  <p className="text-sm text-slate-500">{getSecondaryDetail(selectedOrder)}</p>
+                </div>
+              </div>
+
+              <div className="text-left sm:text-right">
+                <div className={cn('inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold', getElapsedMeta(selectedOrder).chipClass)}>
+                  <Clock3 size={12} />
+                  {getElapsedMeta(selectedOrder).label}
+                </div>
+                <p className="mt-2 text-lg font-semibold text-slate-950">{formatCurrency(selectedOrder.total)}</p>
+              </div>
+            </div>
+          ) : null
+        }
+      >
+        {selectedOrder && (
+          <OrderDetail
+            order={selectedOrder}
+            updatingId={updatingId}
+            onChangeStatus={changeStatus}
+            standalone
+          />
+        )}
+      </Modal>
 
       <CreateManualOrderModal
         isOpen={manualModalOpen}
